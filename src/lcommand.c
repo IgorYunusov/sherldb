@@ -116,8 +116,7 @@ bool ldb_init(struct ldb_context *lctx) {
     lp->status = TERMINATE;
     memset(lp->abspath, 0, PATH_MAX_SIZE);
     memset(lp->args, 0, PATH_MAX_SIZE);
-    memset(lctx->cmd_history, 0, COMMAND_HISTORY_COUNT * sizeof(char*));
-    
+
     lctx->lprog = lp;
     sprintf(lctx->title, "%s, %s", APP_NAME, "a simple gdb-like lua debugger");
     strcpy(lctx->prompt, PROMPT);
@@ -133,23 +132,15 @@ bool ldb_init(struct ldb_context *lctx) {
         return false;
     }
 
+    lctx->cmd_history = (struct cmd_queue*)malloc(sizeof(struct cmd_queue));
+    init_cmd_history(lctx->cmd_history);
+
     return true;
 }
 
 void ldb_uninit(struct ldb_context *lctx) {
     if (lctx->lprog->L) {
         //lua_close(lctx->lprog->L);
-    }
-}
-
-void add2cmd_history(struct ldb_context *lctx, const char *cmd, int size) {
-    int i;
-    for(i=0; i<COMMAND_HISTORY_COUNT; i++) {
-        if( lctx->cmd_history[i] == NULL) {
-            lctx->cmd_history[i] = (char*)malloc(size * sizeof(char));
-            memcpy(lctx->cmd_history[i], cmd, size);
-            return;
-        }
     }
 }
 
@@ -217,7 +208,7 @@ void debug_cmd_loop(struct ldb_context *lctx) {
             continue;
         }
 
-        //add2cmd_history(lctx, readbuff, len);
+        add2cmd_history(lctx->cmd_history, readbuff);
         cmd_handler fn = _get_cmd_handler(&readbuff);
         if(fn) {
             cmd_ret = fn(lctx, readbuff);
@@ -289,9 +280,10 @@ void line_hook(lua_State *L, lua_Debug *ar) {
         file = ar->source + 1;
     }
     //check next command
+    struct cmd_node *last = get_last_cmd(lctx->cmd_history);
     struct CallInfo *curr_ci = lctx->lprog->curr_ci;
-    if(file && lctx->next_tmp_bkt_index &&
-        (curr_ci == ar->i_ci ||tcurr_ci == ar->i_ci->next)) { 
+    if(file && last && strcmp(last->cmd, "n") == 0 &&
+        (curr_ci == ar->i_ci || curr_ci == ar->i_ci->next)) { 
         //printf("currci:%p pre:%p next:%p \n", curr_ci, curr_ci->previous, curr_ci->next);
         lctx->next_tmp_bkt_index = 0;
         debug_cmd_loop(lctx);
@@ -335,6 +327,45 @@ void return_hook(lua_State *L, lua_Debug *ar) {
  * command functions
  * =============================================================================
 */
+
+void init_cmd_history(struct cmd_queue *queue) {
+    queue->head = queue->tail = NULL;
+    queue->count = 0;
+}
+
+void add2cmd_history(struct cmd_queue *queue, const char *cmd) {
+    if(queue->count < COMMAND_HISTORY_COUNT) {
+        struct cmd_node *new_tail = (struct cmd_node*)malloc(sizeof(struct cmd_node));
+        if (new_tail == NULL) {
+            printf("add cmd history, malloc failed!\n");
+            return;
+        }
+        strcpy(new_tail->cmd, cmd);
+
+        if(queue->count == 0) {
+            queue->head = new_tail;
+            queue->tail = new_tail;
+            queue->head->next = NULL;
+        }
+        new_tail->next = queue->tail;
+        queue->tail = new_tail;
+        queue->count++;
+    } else {
+        struct cmd_node *old_head = queue->head;
+        struct cmd_node *t = queue->tail;
+        while(t->next != queue->head) t = t->next;
+        queue->head = t;
+        queue->head->next = NULL;
+        strcpy(old_head->cmd, cmd);
+        old_head->next = queue->tail;
+        queue->tail = old_head;
+    }
+}
+
+struct cmd_node* get_last_cmd(struct cmd_queue *queue) {
+    return queue->tail;
+}
+
 int cmd_debugshow(struct ldb_context *lctx, const char *cmdbuffer) {
     debug_showctx(lctx);
     return 0;
@@ -420,20 +451,14 @@ int cmd_next(struct ldb_context *lctx, const char *cmdbuffer) {
         return CMD_ERR;
     }
     struct ldb_filebuffer *fb = get_filebuffer(lctx, lctx->lprog->abspath);     
+    if (lctx->lprog->status != RUNNING || lctx->lprog->ar == NULL) {
+        printf("cannot use n command now %d\n", lctx->lprog->status);
+        return CMD_ERR;
+    }
     int line = lctx->lprog->ar->currentline;
     printf("%d\t\t%s", line, fb->lines[line]);
 
-    //int next_exec_line = line + 1;
-    //struct ldb_breakpoint bkt;
-    //bkt.type = LUA_MASKLINE;
-    //bkt.hitted_count = 0;
-    //bkt.line = next_exec_line;
-    //bkt.filebuffer = fb;
-    //int index = add_breakpoint(lctx, bkt);
-    //if (index != -1) {
-    //    lctx->next_tmp_bkt_index = index;
-    //}
-    lctx->next_tmp_bkt_index = 1;
+    //lctx->next_tmp_bkt_index = 1;
     lctx->lprog->curr_ci = lctx->lprog->ar->i_ci;
     return CMD_QUIT;
 }

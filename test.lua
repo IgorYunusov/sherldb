@@ -20,4 +20,4 @@ end
 
 a = 7
 a = calc_now2time()
-print(a)
+print("a",a)

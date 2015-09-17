@@ -47,28 +47,6 @@ struct env_var {
     char *value;
 };
 
-//struct cmd_node {
-//    char *cmd;
-//    struct cmd_node *next;
-//};
-//
-//struct cmd_queue {
-//    struct cmd_node *head;
-//    struct cmd_node *tail;
-//    int count;
-//};
-//
-//void add2queue(struct cmd_queue *queue, const char *cmd) {
-//    if(queue->count >= COMMAND_HISTORY_COUNT) {
-//        struct cmd_node *p = queue->head;
-//        queue->head = queue->head->next;
-//        queue->tail->next = 
-//    }
-//}
-//
-//char * get_tail(struct cmd_queue *queue) {
-//   return queue->tail;
-//}
 
 struct ldb_context {
     enum APP_RUN_MODE mode;
@@ -77,7 +55,7 @@ struct ldb_context {
     char *lua_file;
     bool bquit;
     char src_dir[PATH_MAX_SIZE];
-    char *cmd_history[COMMAND_HISTORY_COUNT];
+    struct cmd_queue *cmd_history;
 
     struct lua_program *lprog;
     struct ldb_breakpoint bkt_list[MAX_BREAK_POINT_COUNT];

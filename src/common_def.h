@@ -8,7 +8,7 @@
 #define MAX_LINE_SIZE 1024
 #define COMMON_MAX_STRING_SIZE 512
 #define LIST_COUNT 5
-#define COMMAND_HISTORY_COUNT 100
+#define COMMAND_HISTORY_COUNT 10
 
 #define MAX(a, b) ( (a) > (b) ? (a) : (b) )
 #define MIN(a, b) ( (a) < (b) ? (a) : (b) )

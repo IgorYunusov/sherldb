@@ -5,7 +5,20 @@
 
 typedef int (*cmd_handler)(struct ldb_context *lctx, const char *cmdbuffer);
 
-void command_loop(struct ldb_context *lctx);
+struct cmd_node {
+   char *cmd;
+   struct cmd_node *next;
+};
+
+struct cmd_queue {
+   struct cmd_node *head;
+   struct cmd_node *tail;
+   int count;
+};
+
+void init_cmd_history(struct cmd_queue *queue);
+void add2cmd_history(struct cmd_queue *queue, const char *cmd);
+struct cmd_node* get_last_cmd(struct cmd_queue *queue);
 
 struct lcommand {
     const char *short_name;
@@ -14,6 +27,7 @@ struct lcommand {
     cmd_handler handler; 
 };
 
+void command_loop(struct ldb_context *lctx);
 int cmd_debugshow(struct ldb_context *lctx, const char *cmdbuffer);
 int cmd_help(struct ldb_context *lctx, const char *cmdbuffer);
 int cmd_quit(struct ldb_context *lctx, const char *cmdbuffer);
