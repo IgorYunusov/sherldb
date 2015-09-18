@@ -50,7 +50,7 @@ static struct lcommand lcmds[] = {
     {
         "b",
         "break",
-        "set break point",
+        "Set break point",
         &cmd_break,
     },
     {
@@ -62,25 +62,31 @@ static struct lcommand lcmds[] = {
     {
         "c",
         "continue",
-        "continue exec until net next break point",
+        "Continue exec until net next break point",
         &cmd_continue,
     },
     {
         "n",
         "next",
-        "step program, preceeding through subroutine calls.",
+        "Step program, preceeding through subroutine calls.",
         &cmd_next,
+    },
+    {
+        "s",
+        "step",
+        "Step program until it reacheds a different source line.",
+        &cmd_step,
     },
     {
         "l",
         "list",
-        "list the source code",
+        "List the source code",
         &cmd_list,
     },
     {
         "bt",
         "backtrace",
-        "print backtrace of all stack frames",
+        "Print backtrace of all stack frames",
         &cmd_backtrace,
     },
     {
@@ -123,6 +129,7 @@ bool ldb_init(struct ldb_context *lctx) {
     lctx->bquit = false;
     lctx->bkt_num = 0;
     lctx->fb_num = 0;
+    lctx->cmd_mask = 0;
 
     capacity = 256;
     lctx->environ_list = (struct env_var*)malloc(capacity*sizeof(struct env_var));
@@ -144,22 +151,13 @@ void ldb_uninit(struct ldb_context *lctx) {
     }
 }
 
-cmd_handler _get_cmd_handler(char **cmd) {
+cmd_handler _get_cmd_handler(char *cmd) {
     int i;
-    char *delim;
     for(i = 0; i < sizeof(lcmds)/sizeof(lcmds[0]); ++i) {
-        delim = strstr(*cmd, lcmds[i].name);
-        if (delim == *cmd) {
-            *cmd = *cmd + strlen(lcmds[i].name) + 1; 
-            return lcmds[i].handler;
-        } 
-
         if (strcmp(lcmds[i].short_name, "") == 0) {
             continue;
         }
-        delim = strstr(*cmd, lcmds[i].short_name);
-        if (delim == *cmd) {
-            *cmd = *cmd + strlen(lcmds[i].short_name) + 1;
+        if(strcmp(lcmds[i].short_name, cmd) == 0 || strcmp(lcmds[i].name, cmd) == 0) {
             return lcmds[i].handler;
         }
     }
@@ -175,11 +173,15 @@ void command_loop(struct ldb_context *lctx) {
         if (len == 0) {
             continue;
         }
-
-        //add2cmd_history(lctx, readbuff, len);
-        cmd_handler fn = _get_cmd_handler(&readbuff); 
+        char *cmdbuffer = readbuff;
+        char *token = strsep(&cmdbuffer, " ");
+        if (token == NULL) {
+            token = cmdbuffer;
+        }
+        add2cmd_history(lctx->cmd_history, token, len);
+        cmd_handler fn = _get_cmd_handler(token); 
         if (fn) {
-            cmd_handler_ret = fn(lctx, readbuff);
+            cmd_handler_ret = fn(lctx, cmdbuffer);
         } else {
             printf("\"%s\" unknown command\n", readbuff);
             cmd_help(lctx, NULL); 
@@ -207,11 +209,16 @@ void debug_cmd_loop(struct ldb_context *lctx) {
         if (len == 0) {
             continue;
         }
+        char *cmdbuffer = readbuff;
+        char *token = strsep(&cmdbuffer, " ");
+        if (token == NULL) {
+            token = cmdbuffer;
+        }
+        add2cmd_history(lctx->cmd_history, token, len);
+        cmd_handler fn = _get_cmd_handler(token); 
 
-        add2cmd_history(lctx->cmd_history, readbuff);
-        cmd_handler fn = _get_cmd_handler(&readbuff);
         if(fn) {
-            cmd_ret = fn(lctx, readbuff);
+            cmd_ret = fn(lctx, cmdbuffer);
         } else {
             printf("\"%s\" unknown command\n", readbuff);
             cmd_help(lctx, NULL); 
@@ -276,16 +283,20 @@ void line_hook(lua_State *L, lua_Debug *ar) {
     }
 
     //printf("ci:%p pre:%p next:%p currentline:%d\n", ar->i_ci, ar->i_ci->previous,ar->i_ci->next, ar->currentline);
+    //struct cmd_node *last = get_last_cmd(lctx->cmd_history);
     if( ar->source[0] == '@' ) {
         file = ar->source + 1;
     }
     //check next command
-    struct cmd_node *last = get_last_cmd(lctx->cmd_history);
     struct CallInfo *curr_ci = lctx->lprog->curr_ci;
-    if(file && last && strcmp(last->cmd, "n") == 0 &&
+    if(file && (lctx->cmd_mask & CMD_NEXT) &&
         (curr_ci == ar->i_ci || curr_ci == ar->i_ci->next)) { 
         //printf("currci:%p pre:%p next:%p \n", curr_ci, curr_ci->previous, curr_ci->next);
-        lctx->next_tmp_bkt_index = 0;
+        debug_cmd_loop(lctx);
+        return;
+    }
+    //check step command
+    if(file && (lctx->cmd_mask & CMD_STEP)) {
         debug_cmd_loop(lctx);
         return;
     }
@@ -297,10 +308,6 @@ void line_hook(lua_State *L, lua_Debug *ar) {
             printf("Breakpoint %d, at %s:%d\n", bkt_index, fb->abspath, lctx->bkt_list[bkt_index].line);
             lctx->lprog->ar = ar;
 
-            if(lctx->next_tmp_bkt_index == bkt_index) {
-                lctx->bkt_list[bkt_index].avaliable = false;
-                lctx->next_tmp_bkt_index = 0;
-            }
             debug_cmd_loop(lctx);
         }
     } 
@@ -333,13 +340,14 @@ void init_cmd_history(struct cmd_queue *queue) {
     queue->count = 0;
 }
 
-void add2cmd_history(struct cmd_queue *queue, const char *cmd) {
+void add2cmd_history(struct cmd_queue *queue, const char *cmd, int size) {
     if(queue->count < COMMAND_HISTORY_COUNT) {
         struct cmd_node *new_tail = (struct cmd_node*)malloc(sizeof(struct cmd_node));
         if (new_tail == NULL) {
             printf("add cmd history, malloc failed!\n");
             return;
         }
+        new_tail->cmd = (char*)malloc(sizeof(char)*size);
         strcpy(new_tail->cmd, cmd);
 
         if(queue->count == 0) {
@@ -446,26 +454,31 @@ struct ldb_filebuffer *get_filebuffer(struct ldb_context *lctx, const char *absp
 
 
 int cmd_next(struct ldb_context *lctx, const char *cmdbuffer) {
-    if(!lctx || !lctx->lprog) {
-        printf("err nil lctx or lprog\n");
+    if (lctx->lprog->status != RUNNING) {
+        printf("program not running! %d\n", lctx->lprog->status);
         return CMD_ERR;
     }
     struct ldb_filebuffer *fb = get_filebuffer(lctx, lctx->lprog->abspath);     
-    if (lctx->lprog->status != RUNNING || lctx->lprog->ar == NULL) {
-        printf("cannot use n command now %d\n", lctx->lprog->status);
-        return CMD_ERR;
-    }
     int line = lctx->lprog->ar->currentline;
     printf("%d\t\t%s", line, fb->lines[line]);
 
-    //lctx->next_tmp_bkt_index = 1;
     lctx->lprog->curr_ci = lctx->lprog->ar->i_ci;
+    lctx->cmd_mask = CMD_NEXT;
     return CMD_QUIT;
 }
 
 int cmd_step(struct ldb_context *lctx, const char *cmdbuffer) {
-    
-    return CMD_OK;
+    if (lctx->lprog->status != RUNNING) {
+        printf("program not running! %d\n", lctx->lprog->status);
+        return CMD_ERR;
+    }
+    struct ldb_filebuffer *fb = get_filebuffer(lctx, lctx->lprog->abspath);     
+    int line = lctx->lprog->ar->currentline;
+    printf("%d\t\t%s", line, fb->lines[line]);
+
+    lctx->lprog->curr_ci = lctx->lprog->ar->i_ci;
+    lctx->cmd_mask = CMD_STEP;
+    return CMD_QUIT;
 }
 
 int cmd_list(struct ldb_context *lctx, const char *cmdbuffer) {
@@ -510,7 +523,7 @@ int cmd_loadluafile(struct ldb_context *lctx, const char *filepath) {
         printf("load %s failed,errno:%d\n", abspath, errno);
         return -1;
     }
-    strcpy(lctx->lprog->abspath, filepath);
+    strcpy(lctx->lprog->abspath, abspath);
     lctx->lprog->L = luaL_newstate();
 
     lua_pushstring(lctx->lprog->L, REGISTRY_TAG);
@@ -519,8 +532,6 @@ int cmd_loadluafile(struct ldb_context *lctx, const char *filepath) {
 
     int mask = lua_gethookmask(lctx->lprog->L);
     lua_sethook(lctx->lprog->L, line_hook, LUA_MASKLINE | mask, 0);
-    //mask = lua_gethookmask(lctx->lprog->L);
-    //lua_sethook(lctx->lprog->L, return_hook, LUA_MASKRET | mask, 0);
     return 0;
 }
 
@@ -543,6 +554,7 @@ int cmd_run(struct ldb_context *lctx, const char *cmdbuffer) {
             nargs++;
         }
         lua_pcall(lp->L, nargs, LUA_MULTRET, 0);
+        printf("program end\n");
         lp->status = TERMINATE;
     }
     return CMD_OK;

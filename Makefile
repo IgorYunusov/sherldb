@@ -10,4 +10,5 @@ sherldb: $(SOURCE)
 	$(CC) -o $(BIN_DIR)/sherldb $(SOURCE) $(INCLUDE) $(CFLAGS)
 
 clean:
-	rm $(BIN_DIR)/sherldb
+	-rm $(BIN_DIR)/sherldb
+	-rm ./core

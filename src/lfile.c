@@ -35,5 +35,7 @@ int load_sourcefile(struct ldb_filebuffer *filebuffer, const char *path) {
 
     strcpy(filebuffer->abspath, path);
     filebuffer->line_count = line_num - 1;
+
+    fclose(f);
     return 0;
 }

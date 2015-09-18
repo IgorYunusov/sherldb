@@ -17,7 +17,7 @@ struct cmd_queue {
 };
 
 void init_cmd_history(struct cmd_queue *queue);
-void add2cmd_history(struct cmd_queue *queue, const char *cmd);
+void add2cmd_history(struct cmd_queue *queue, const char *cmd, int size);
 struct cmd_node* get_last_cmd(struct cmd_queue *queue);
 
 struct lcommand {
@@ -26,6 +26,11 @@ struct lcommand {
     const char *help;
     cmd_handler handler; 
 };
+
+#define CMD_NEXT (1<<0)
+#define CMD_STEP (1<<1)
+#define CMD_CONTINUE (1<<2)
+#define CMD_BREAK (1<<3)
 
 void command_loop(struct ldb_context *lctx);
 int cmd_debugshow(struct ldb_context *lctx, const char *cmdbuffer);

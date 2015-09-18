@@ -64,7 +64,7 @@ struct ldb_context {
     int fb_num;
     struct env_var *environ_list;
     int env_num;
-    int next_tmp_bkt_index;
+    int cmd_mask;
 
 };
 
