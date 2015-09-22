@@ -54,6 +54,12 @@ static struct lcommand lcmds[] = {
         &cmd_break,
     },
     {
+        "d",
+        "delete break",
+        "delete break point",
+        &cmd_delete_break,
+    },
+    {
         "r", 
         "run",
         "exec lua file",
@@ -160,9 +166,6 @@ void ldb_uninit(struct ldb_context *lctx) {
 cmd_handler _get_cmd_handler(char *cmd) {
     int i;
     for(i = 0; i < sizeof(lcmds)/sizeof(lcmds[0]); ++i) {
-        if (strcmp(lcmds[i].short_name, "") == 0) {
-            continue;
-        }
         if(strcmp(lcmds[i].short_name, cmd) == 0 || strcmp(lcmds[i].name, cmd) == 0) {
             return lcmds[i].handler;
         }
@@ -246,16 +249,16 @@ void debug_cmd_loop(struct ldb_context *lctx) {
 int add_breakpoint(struct ldb_context *lctx, struct ldb_breakpoint bkt) {
     int i;
     for(i=0; i<lctx->bkt_num; i++) {
-        if(lctx->bkt_list[i].avaliable) {
+        if(!lctx->bkt_list[i].avaliable) {
             memcpy(&lctx->bkt_list[i], &bkt, sizeof(bkt));
-            lctx->bkt_list[i].avaliable = false;
+            lctx->bkt_list[i].avaliable = true;
             return i;
         }
     }
     if( lctx->bkt_num < MAX_BREAK_POINT_COUNT) {
         memcpy(&lctx->bkt_list[lctx->bkt_num], &bkt, sizeof(bkt));
         lctx->bkt_num++;
-        lctx->bkt_list[lctx->bkt_num-1].avaliable = false;
+        lctx->bkt_list[lctx->bkt_num-1].avaliable = true;
         return lctx->bkt_num - 1;
     }
     
@@ -266,6 +269,8 @@ int add_breakpoint(struct ldb_context *lctx, struct ldb_breakpoint bkt) {
 int find_breakpoint(struct ldb_context *lctx, const char *abspath, int line) {
     int i = 0;
     for(; i<lctx->bkt_num; i++) {
+        if(!lctx->bkt_list[i].avaliable)
+            continue;
         struct ldb_filebuffer *fb = lctx->bkt_list[i].filebuffer;
         if(strcmp(fb->abspath, abspath) == 0 && lctx->bkt_list[i].line == line) {
             return i;
@@ -437,6 +442,17 @@ int cmd_break(struct ldb_context *lctx, const char *cmdbuffer) {
         printf("Breakpoint %d at file %s, line %d.\n", index, bkt.filebuffer->abspath, bkt.line);
     }
 
+    return CMD_OK;
+}
+
+int cmd_delete_break(struct ldb_context *lctx, const char *cmdbuffer) {
+    int bkt_index = atoi(cmdbuffer);
+    if (bkt_index <= 0) {
+        printf("invalid break point id\n");
+        return CMD_ERR;
+    }
+
+    lctx->bkt_list[bkt_index-1].avaliable = false;
     return CMD_OK;
 }
 

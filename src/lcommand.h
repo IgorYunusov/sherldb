@@ -39,6 +39,7 @@ int cmd_help(struct ldb_context *lctx, const char *cmdbuffer);
 int cmd_quit(struct ldb_context *lctx, const char *cmdbuffer);
 int cmd_loadluafile(struct ldb_context *lctx, const char *cmdbuffer);
 int cmd_break(struct ldb_context *lctx, const char *cmdbuffer);
+int cmd_delete_break(struct ldb_context *lctx, const char *cmdbuffer);
 int cmd_run(struct ldb_context *lctx, const char *cmdbuffer);
 int cmd_setargs(struct ldb_context *lctx, const char *cmdbuffer);
 int cmd_continue(struct ldb_context *lctx, const char *cmdbuffer);
