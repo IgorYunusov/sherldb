@@ -32,6 +32,7 @@ struct lcommand {
 #define CMD_CONTINUE (1<<2)
 #define CMD_BREAK (1<<3)
 
+//void ldb_output();
 void command_loop(struct ldb_context *lctx);
 int cmd_debugshow(struct ldb_context *lctx, const char *cmdbuffer);
 int cmd_help(struct ldb_context *lctx, const char *cmdbuffer);
@@ -44,7 +45,11 @@ int cmd_continue(struct ldb_context *lctx, const char *cmdbuffer);
 int cmd_next(struct ldb_context *lctx, const char *cmdbuffer);
 int cmd_step(struct ldb_context *lctx, const char *cmdbuffer);
 int cmd_list(struct ldb_context *lctx, const char *cmdbuffer);
+int cmd_print(struct ldb_context *lctx, const char *cmdbuffer);
 int cmd_backtrace(struct ldb_context *lctx, const char *cmdbuffer);
 int cmd_set_environment(struct ldb_context *lctx, const char *cmdbuffer);
+
+void print_luavar(lua_State *L, int index, int layer);
+void print_luatable(lua_State *L, int index, int layer);
 
 #endif

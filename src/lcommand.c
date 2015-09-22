@@ -84,6 +84,12 @@ static struct lcommand lcmds[] = {
         &cmd_list,
     },
     {
+        "p",
+        "print",
+        "print the value with the specific format",
+        &cmd_print,
+    },
+    {
         "bt",
         "backtrace",
         "Print backtrace of all stack frames",
@@ -242,12 +248,14 @@ int add_breakpoint(struct ldb_context *lctx, struct ldb_breakpoint bkt) {
     for(i=0; i<lctx->bkt_num; i++) {
         if(lctx->bkt_list[i].avaliable) {
             memcpy(&lctx->bkt_list[i], &bkt, sizeof(bkt));
+            lctx->bkt_list[i].avaliable = false;
             return i;
         }
     }
     if( lctx->bkt_num < MAX_BREAK_POINT_COUNT) {
         memcpy(&lctx->bkt_list[lctx->bkt_num], &bkt, sizeof(bkt));
         lctx->bkt_num++;
+        lctx->bkt_list[lctx->bkt_num-1].avaliable = false;
         return lctx->bkt_num - 1;
     }
     
@@ -434,6 +442,7 @@ int cmd_break(struct ldb_context *lctx, const char *cmdbuffer) {
 
 int cmd_continue(struct ldb_context *lctx, const char *cmdbuffer) {
     if(lctx->lprog && lctx->lprog->status == RUNNING) {
+        lctx->cmd_mask = CMD_CONTINUE;
         printf("Continuing.\n");
         return CMD_QUIT;
     } else {
@@ -516,6 +525,139 @@ int cmd_list(struct ldb_context *lctx, const char *cmdbuffer) {
     return CMD_OK;
 }
 
+void print_luatable(lua_State *L, int index, int layer) {
+    int i;
+    printf("%s(%p)\n", luaL_typename(L, index), lua_topointer(L, index));
+    for(i=0; i<layer-1; i++) printf("    ");
+    printf("{\n");
+
+    lua_pushnil(L);
+    while(lua_next(L, -2) != 0) {
+        for(i=0; i<layer; i++) printf("    ");
+        if(lua_isinteger(L, -2)) {
+            printf("%d : ", (int)lua_tointeger(L, -2));
+        } else if(lua_isnumber(L, -2)) {
+            printf("%f : ", lua_tonumber(L, -2));
+        } else if(lua_isstring(L, -2)) {
+            printf("\"%s\" : ", lua_tostring(L, -2));
+        }
+        print_luavar(L, -1, layer+1);
+        printf("\n");
+        lua_pop(L, 1);
+    }
+    for(i=0; i<layer-1; i++) printf("    ");
+    printf("}");
+}
+
+void print_luavar(lua_State *L, int index, int layer) {
+    int type = lua_type(L, index);
+    switch(type) {
+        case LUA_TNIL:
+            printf("nil");
+            break;
+        case LUA_TNUMBER:
+            if(lua_isinteger(L, index)) {
+                printf("%s", lua_tostring(L, index));
+            } else {
+                printf("%f",lua_tonumber(L, index));
+            }
+            break;
+        case LUA_TSTRING:
+            printf("\"%s\"", lua_tostring(L, index));
+            break;
+        case LUA_TBOOLEAN:
+            printf("%s", lua_toboolean(L, index) ? "true" : "false");
+            break;
+        case LUA_TTABLE:
+            print_luatable(L, index, layer);
+            break;
+        case LUA_TFUNCTION:
+        case LUA_TUSERDATA:
+        case LUA_TTHREAD:
+        case LUA_TLIGHTUSERDATA:
+            printf("%p(%s)", lua_topointer(L, index), luaL_typename(L, index)); 
+            break;
+        default:
+            break;
+    }
+}
+
+int find_locals(lua_State *L, lua_Debug *ar, const char *var_name) {
+    int index = 1;
+    const char *name;
+    while((name = lua_getlocal(L, ar, index)) != NULL) {
+        if(strcmp(name, var_name) == 0) {
+            return index;
+        }
+        if(strcmp(name, "(*temporary)") == 0) {
+            lua_pop(L, 1);
+            break;
+        }
+        index++;
+        lua_pop(L, 1);
+    }
+    return 0;
+}
+
+int find_globals(lua_State *L, const char *var_name) {
+    lua_getglobal(L, var_name);
+    if(!lua_isnil(L, -1)) {
+        return 1;
+    } else {
+        lua_pop(L, 1);
+        return 0;
+    }
+}
+
+int find_upvalues(lua_State *L, lua_Debug *ar, const char *var_name) {
+    printf("find upvalus\n");
+    lua_getinfo(L, "uf", ar);
+    if(lua_isfunction(L, -1) == 0) {
+        printf("not is a function");
+        return 0;
+    }
+    int i;
+    const char *upname;
+    for(i=1; i<=ar->nups; i++) {
+        upname = lua_getupvalue(L, -1, i);
+        if(upname != NULL && strcmp(upname, var_name) == 0) {
+            return 1;
+        }
+        lua_pop(L, 1);
+    }
+    lua_pop(L, 1);
+    return 0;
+}
+
+int cmd_print(struct ldb_context *lctx, const char *cmdbuffer) {
+    if (lctx->lprog->status != RUNNING) {
+        printf("program not running! %d\n", lctx->lprog->status);
+        return CMD_ERR;
+    }
+    printf("btop %d\n", lua_gettop(lctx->lprog->L));
+    //try local vairables
+    if(find_locals(lctx->lprog->L, lctx->lprog->ar, cmdbuffer)) {
+        printf("local %s = ", cmdbuffer);
+        print_luavar(lctx->lprog->L, -1, 1); 
+        printf("\n");
+        lua_pop(lctx->lprog->L, 1);
+    } else if(find_globals(lctx->lprog->L, cmdbuffer)) {
+        printf("global %s = ", cmdbuffer);
+        print_luavar(lctx->lprog->L, -1, 1);
+        printf("\n");
+        lua_pop(lctx->lprog->L, 1);
+    } else if(find_upvalues(lctx->lprog->L, lctx->lprog->ar, cmdbuffer)) {
+        printf("upvalue %s = ", cmdbuffer);
+        print_luavar(lctx->lprog->L, -1, 1);
+        printf("\n");
+        lua_pop(lctx->lprog->L, 1);
+    } else {
+        printf("%s = nil\n",cmdbuffer);
+    }
+    printf("atop %d\n", lua_gettop(lctx->lprog->L));
+    return CMD_OK;
+}
+
 int cmd_loadluafile(struct ldb_context *lctx, const char *filepath) {
     char abspath[PATH_MAX_SIZE];
     sprintf(abspath, "%s/%s", lctx->src_dir, filepath);
@@ -553,8 +695,16 @@ int cmd_run(struct ldb_context *lctx, const char *cmdbuffer) {
             lua_pushstring(lp->L, arg);
             nargs++;
         }
-        lua_pcall(lp->L, nargs, LUA_MULTRET, 0);
-        printf("program end\n");
+        int ret = lua_pcall(lp->L, nargs, LUA_MULTRET, 0);
+        if (ret == LUA_OK) {
+            printf("program end\n");
+        } else {
+            printf("%s\n", lua_tostring(lp->L, -1));
+            //const char *traceback;
+            //luaL_traceback(lp->L, lp->L, NULL, 1);
+            //traceback = lua_tostring(lp->L, -1); 
+            //printf("%s\n", traceback);
+        }
         lp->status = TERMINATE;
     }
     return CMD_OK;
